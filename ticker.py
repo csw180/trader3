@@ -1,7 +1,6 @@
 import time
 import pyupbit
 import pandas as pd
-import numpy as np
 import datetime as dt
 import pyupbit
 import matplotlib.pyplot as plt
@@ -21,9 +20,9 @@ class Ticker :
         self.name =  name
         self.currency = name[name.find('-')+1:]
         self.fee = 0.0005   #업비트 거래소 매매거래 수수료
+        self.isgood = True
         self.base = self.get_max_base()
         self.k = self.get_max_k(self.base)
-        self.isgood = True
 
     def __repr__(self):
         return f"<Ticker {self.name}>"
@@ -49,19 +48,24 @@ class Ticker :
 
     def get_max_base(self) :
         basedict = {}
+        maxBase =  0
         for b in range(1,24,1) :
             df = self.get_ohlcv_custom(b) 
-            d = ( df['close'][-1] - df['open'][-1] ) / df['open'][-1]
+            if len(df.index) <= 2 :
+                continue
+            d = ( df['close'][-2] - df['open'][-2] ) / df['open'][-2]
             basedict[str(round(d,4))] = str(b)
-
-        maxkey = max(basedict.keys(), key=(lambda k : float(k)))
-        maxBase = int(basedict[maxkey])
+        if len(basedict) > 0 :
+            maxkey = max(basedict.keys(), key=(lambda k : float(k)))
+            maxBase = int(basedict[maxkey])
         # print(basedict)
         # print(f'maxBase={maxBase}')
         return maxBase
 
     def get_max_k(self,base) :
         df = self.get_ohlcv_custom(base)
+        if len(df.index) <= 2 :
+            return 0 
         df['adjust'] = ( df['close'].shift(1) - df['low'] ) / df['close'].shift(1)
         df = df[df['close'].shift(1)-df['open'].shift(1) > 0]
         mean = df['adjust'].mean()
@@ -72,20 +76,30 @@ class Ticker :
     def make_df(self) :
         try :
             df = self.get_ohlcv_custom(self.base)
+            if len(df.index) <= 2 :
+                self.isgood = False
+                return
+            df['asc_ratio'] = ( df['close'] - df['open'] ) / df['open']
             df['target'] = df['open'].shift(1) + ( ( df['close'].shift(1) - df['open'].shift(1) ) * (1-self.k) )
             self.df = df.copy()
             self.target_price = df.iloc[-1]['target'] 
 
+            print_(self.name,'------------------')
             print_(self.name, f"k, base, target_price : {self.k:,.4f}, {self.base}, {self.target_price:,.4f}" )
-            print_(self.name, f"idx-1:ma5_acd > 0 : {df.iloc[-1]['ma5_acd'] } > 0" )
-            print_(self.name, f"idx-1:low > target_price : {df.iloc[-1]['low']} > {self.target_price:,.4f}" )
-            print_(self.name, f"idx-2:close > idx-2:open : {df.iloc[-2]['close']} > {df.iloc[-2]['open']}" )
+            print_(self.name, f"idx-1:ma5_acd > 0 : {df.iloc[-1]['ma5_acd']:,.4f} > 0" )
+            print_(self.name, f"idx-1:low > target_price : {df.iloc[-1]['low']:,.4f} > {self.target_price:,.4f}" )
+            print_(self.name, f"idx-2:asc_ratio > 0.04 : {df.iloc[-2]['asc_ratio']:,.4f} > 0.04" )
 
             # 일봉상 5이평선이 우상향
             self.isgood = True if df.iloc[-1]['ma5_acd'] > 0 else False
             # 이미 목표가에 도달했었던 적있는 경우는 제외
             self.isgood = self.isgood and ( True if df.iloc[-1]['low'] > self.target_price else False )
-            self.isgood = self.isgood and ( True if df.iloc[-2]['close'] > df.iloc[-2]['open'] else False )
+            # 직전봉 4%이상 상승봉
+            self.isgood = self.isgood and ( True if df.iloc[-2]['asc_ratio'] > 0.04 else False )
+            print_(self.name, f"isgood : {self.isgood}" )
+            pd.set_option('display.max_columns', None)
+            print(self.df.tail(3), flush=True)
+            print_(self.name,'------------------')
         except Exception :
             pass
 
